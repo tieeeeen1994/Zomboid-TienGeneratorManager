@@ -169,14 +169,17 @@ local function remember(obj, was)
     end
 end
 
--- A square every running generator in reach has red: keep it without power. Returns true
--- when it switched something off.
+-- A square with devices every running generator that reaches them has red: keep those
+-- without power (decided per device: light switches reach further, TGM.resolveDevice).
+-- Returns true when it switched something off.
 local function cutSquare(square)
     local changed = false
     local devices = TGM.devicesOn(square)
     for i = 1, #devices do
         local obj = devices[i]
-        if TGM.isFridge(obj) then
+        if TGM.resolveDevice(obj, square) ~= TGM.OFF then
+            -- powered (or left to vanilla): nothing to cut
+        elseif TGM.isFridge(obj) then
             if TGM.unplugsFridges() and not TGM.isUnplugged(obj) and unplug(obj) then
                 markSquare(square)
                 changed = true
@@ -198,13 +201,12 @@ end
 
 -- A square with cut devices: give them back once it has power (or is left to vanilla).
 local function restoreSquare(square, key)
-    local x, y, z = square:getX(), square:getY(), square:getZ()
-    local stillCut = TGM.resolve(x, y, z, square) == TGM.OFF
     local left = false
     local changed = false
     local devices = TGM.devicesOn(square)
     for i = 1, #devices do
         local obj = devices[i]
+        local stillCut = TGM.resolveDevice(obj, square) == TGM.OFF
         if TGM.isUnplugged(obj) then
             if stillCut and TGM.unplugsFridges() then
                 left = true
@@ -350,7 +352,7 @@ function TGM.applySet(player, args)
     local count = 0
     if all then
         -- every square of one floor in reach: that floor's default, its squares' own settings cleared
-        if floor < math.max(-32, gz - g.vr) or floor > math.min(31, gz + g.vr) then
+        if floor < math.max(-32, gz - g.vr) or floor > math.min(31, gz + g.vr + 1) then
             return false, "IGUI_TGM_Refused"
         end
         local kept = {}
@@ -366,7 +368,8 @@ function TGM.applySet(player, args)
             count = count + 1
             if count > MAX_KEYS then break end
             local x, y, z = TGM.parseKey(key)
-            if x and TGM.inRange(g, gx, gy, gz, x, y, z) then
+            -- in reach, or within one tile of it (lights, see TGM.reachesAround)
+            if x and TGM.nearRange(g, gx, gy, gz, x, y, z) then
                 -- auto against a floor default of connect / disconnect has to be stored, or
                 -- the square would fall back to that default; otherwise auto = no entry
                 local floorDefault = settings[TGM.floorKey(z)]

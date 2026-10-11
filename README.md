@@ -39,7 +39,8 @@ that away from one square. So a blackout is imitated:
   become fridges again when the square has power. While unplugged, other mods that look for fridges do not see them.
   The sandbox option Unplug fridges and freezers turns this off.
 - **Ceiling lights belong to a whole room**: a room stays lit while any of its light switches is on a powered square,
-  and goes dark only when all of them are disconnected. Lamps follow their own square.
+  and goes dark only when all of them are disconnected. Lamps follow their own square. Lights also take power from the squares right next to them (as in vanilla), so the
+  map shows lamps and flood lights one tile past the circle, and one floor above it, too.
 - Fuel pumps cannot be switched off. Radios and TVs on batteries are left alone.
 - Switching happens on the server where the area is loaded; devices in an area nobody is near are switched when it
   loads again.

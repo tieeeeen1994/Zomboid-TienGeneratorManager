@@ -45,6 +45,13 @@ Engine facts below were traced in the 42.21 jar (Vineflower; recipe in ZomboidFi
   square centres <= `GeneratorTileRange`). `setHaveElectricity` is a deprecated no-op (only updates light switches).
   `setSurroundingElectricity` rebuilds the chunk lists on activation, chunk load and (clients) lighting passes. So an
   unpowered square is emulated: devices switched off and remembered, fridges unplugged, all given back with power.
+- Light switches reach further: `IsoLightSwitch.canSwitchLight` → `hasElectricityAround` (~421) is true when the
+  switch's square or any of the 8 around it on its floor or the 9 below has `haveElectricity()` (pre-shutoff: building
+  squares). So a lamp / flood light (GroupName Flood, CustomName Lights: lightR, LightRadius 24, no streetlight flag)
+  one tile past a generator's circle, or one floor above its top floor, is lit, and `setSurroundingElectricity` never
+  bills it. The mod resolves light switches with that rule (`TGM.reachesAround`, `resolve(..., light)`,
+  `resolveDevice`), scans and draws one tile and one floor further, and accepts keys there (`nearRange`).
+  LightingJNI (~262) asks `lightSwitch.canSwitchLight()` for a switch's light source, `sq.haveElectricity()` otherwise.
 - `IsoObject.couldBePoweredByGenerator()`: base = piped fuel or a fridge/freezer container; true for IsoStove,
   IsoTelevision, IsoRadio, IsoClothingWasher/Dryer, IsoCombination/StackedWasherDryer, IsoCarBatteryCharger;
   IsoLightSwitch = not a street light; IsoWorldInventoryObject false. `getGeneratorPowerConsumption()`: fridge 0.08,

@@ -1,7 +1,8 @@
 --[[
     Tien's Generator Manager -- client: Show range and Show devices (Generator submenu)
 
-    Show range tints every square the generator reaches on the player's floor: a faint even
+    Show range tints every square the generator reaches on the player's floor (the circle;
+    lights also take power one tile past it, TGM.reachesAround, and Show devices finds those): a faint even
     fill, edge to edge, with a stronger band along the boundary. Show devices outlines every
     device in reach on every floor, coloured by who powers it (green this generator, blue
     another one, red nobody: power cut, grey no running generator), with the screen markers
@@ -123,24 +124,25 @@ local function scanDevices(d)
     d.scanned = getTimestampMs()
     local g = TGM.geom()
     local map = {}
-    for z = math.max(-32, d.z - g.vr), math.min(31, d.z + g.vr) do
-        for x = d.x - g.radius, d.x + g.radius do
-            local dx = x - d.x
-            for y = d.y - g.radius, d.y + g.radius do
-                local dy = y - d.y
-                if dx * dx + dy * dy <= g.r2 then
+    -- one tile past the circle and one floor above it: lights reached by the light rule
+    for z = math.max(-32, d.z - g.vr), math.min(31, d.z + g.vr + 1) do
+        for x = d.x - g.radius - 1, d.x + g.radius + 1 do
+            for y = d.y - g.radius - 1, d.y + g.radius + 1 do
+                if TGM.nearRange(g, d.x, d.y, d.z, x, y, z) then
                     local square = getSquare(x, y, z)
                     if square then
                         local list = TGM.devicesOn(square)
-                        if #list > 0 then
-                            local owner = TGM.resolve(x, y, z, square)
-                            local col
-                            if owner == TGM.OFF then col = DEVICE_COLOR.off
-                            elseif not owner then col = DEVICE_COLOR.none
-                            elseif owner.key == d.key then col = DEVICE_COLOR.this
-                            else col = DEVICE_COLOR.other end
-                            for i = 1, #list do
-                                map[list[i]] = { playerNum = d.playerNum, r = col[1], g = col[2], b = col[3] }
+                        for i = 1, #list do
+                            local obj = list[i]
+                            local light = TGM.isLightSwitch(obj)
+                            if TGM.reaches(g, d.x, d.y, d.z, x, y, z, square, light) then
+                                local owner = TGM.resolve(x, y, z, square, light)
+                                local col
+                                if owner == TGM.OFF then col = DEVICE_COLOR.off
+                                elseif not owner then col = DEVICE_COLOR.none
+                                elseif owner.key == d.key then col = DEVICE_COLOR.this
+                                else col = DEVICE_COLOR.other end
+                                map[obj] = { playerNum = d.playerNum, r = col[1], g = col[2], b = col[3] }
                             end
                         end
                     end

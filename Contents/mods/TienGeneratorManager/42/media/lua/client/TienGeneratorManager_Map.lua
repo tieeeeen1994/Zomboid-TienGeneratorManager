@@ -23,6 +23,11 @@
     getRenderYOffset(), 2x tiles at half scale; the devices drawn solid, the rest faded),
     and the list of its devices.
 
+    Lights reach one tile further and one floor up (TGM.reachesAround, the engine's
+    IsoLightSwitch.hasElectricityAround): the grid has one cell more on every side than the
+    circle, and the floor above the top floor can be shown; outside the circle only the lights
+    this generator reaches that way are drawn and can be painted.
+
     The map sits in a fixed viewport: the mouse wheel zooms around the cursor (the - and +
     buttons around the centre), right-drag pans; drawing is clipped with setStencilRect and
     only visible cells are drawn. It is rebuilt from the client's loaded squares every half
@@ -87,6 +92,7 @@ function Grid:new(x, y, cells, view, win)
     local o = ISPanel.new(self, x, y, view, view)
     o.win = win
     o.cells = cells
+    o.half = (cells - 1) / 2
     o.fitCell = math.max(1, view / cells)
     o.cell = o.fitCell
     o.offX, o.offY = 0, 0
@@ -112,8 +118,9 @@ end
 function Grid:rebuild()
     local win = self.win
     local g = TGM.geom()
-    local r, z = g.radius, win.floor
+    local r, z = self.half, win.floor
     local gen = win:liveGen()
+    local floorInReach = z >= math.max(-32, win.gz - g.vr) and z <= math.min(31, win.gz + g.vr)
     local rects, lines, devices, tints = {}, {}, {}, {}
     for j = 0, self.cells - 1 do
         local y = win.gy - r + j
@@ -124,19 +131,39 @@ function Grid:rebuild()
             local x = win.gx - r + i
             local dx, dy = i - r, j - r
             local color = C.outside
-            if dx * dx + dy * dy <= g.r2 then
+            local inDisc = floorInReach and dx * dx + dy * dy <= g.r2
+            local list, square = nil, nil
+            if inDisc then
+                square = getSquare(x, y, z)
+                list = square and TGM.devicesOn(square) or {}
+            elseif TGM.nearRange(g, win.gx, win.gy, win.gz, x, y, z) then
+                -- past the circle (or a floor above it): only lights this generator reaches
+                square = getSquare(x, y, z)
+                list = {}
+                if square and TGM.reachesAround(g, win.gx, win.gy, win.gz, x, y, z) then
+                    local all = TGM.devicesOn(square)
+                    for k = 1, #all do
+                        if TGM.isLightSwitch(all[k]) then list[#list + 1] = all[k] end
+                    end
+                end
+            end
+            if inDisc then
                 color = C.nothing
-                local square = getSquare(x, y, z)
                 if square then
                     if square:getRoom() then color = C.room
                     elseif square:has(IsoFlagType.solidfloor) then color = C.ground end
                     wallLines(lines, square, i, j)
                 end
+            end
+            if list and (inDisc or #list > 0) then
                 local key = TGM.key(x, y, z)
-                local list = square and TGM.devicesOn(square) or {}
                 local setting = win:settingFor(gen, key)
                 if #list > 0 then
-                    local owner = TGM.resolve(x, y, z, square)
+                    local lightsOnly = true
+                    for k = 1, #list do
+                        if not TGM.isLightSwitch(list[k]) then lightsOnly = false end
+                    end
+                    local owner = TGM.resolve(x, y, z, square, lightsOnly)
                     local result = nil
                     if owner == TGM.OFF then result = "off"
                     elseif owner then result = owner.key == win.genKey and "this" or "other" end
@@ -241,7 +268,7 @@ function Grid:render()
         end
     end
     -- painted, not answered yet, and not in the list (blank squares)
-    local r = TGM.geom().radius
+    local r = self.half
     for key, setting in pairs(pending) do
         if not self.deviceAt[key] then
             local x, y, z = TGM.parseKey(key)
@@ -282,14 +309,17 @@ function Grid:cellAt(x, y)
     local T = self.cell
     local i, j = math.floor((x + self.offX) / T), math.floor((y + self.offY) / T)
     if i < 0 or j < 0 or i >= self.cells or j >= self.cells then return nil end
-    local r = TGM.geom().radius
-    local dx, dy = i - r, j - r
-    if dx * dx + dy * dy > TGM.geom().r2 then return nil end
-    return i, j
+    local g = TGM.geom()
+    local dx, dy = i - self.half, j - self.half
+    local floorInReach = self.win.floor >= math.max(-32, self.win.gz - g.vr)
+        and self.win.floor <= math.min(31, self.win.gz + g.vr)
+    if floorInReach and dx * dx + dy * dy <= g.r2 then return i, j end
+    if self.deviceAt and self.deviceAt[self:keyOf(i, j)] then return i, j end
+    return nil
 end
 
 function Grid:keyOf(i, j)
-    local r = TGM.geom().radius
+    local r = self.half
     return TGM.key(self.win.gx - r + i, self.win.gy - r + j, self.win.floor)
 end
 
@@ -565,7 +595,8 @@ end
 function Window:syncButtons()
     local g = TGM.geom()
     self.btnDown:setEnable(self.floor > math.max(-32, self.gz - g.vr))
-    self.btnUp:setEnable(self.floor < math.min(31, self.gz + g.vr))
+    -- one floor above the top floor: lights lit from below (TGM.reachesAround)
+    self.btnUp:setEnable(self.floor < math.min(31, self.gz + g.vr + 1))
     for state, btn in pairs(self.brushButtons) do
         local col = SETTING_COLOR[state]
         local a = state == self.brush and 0.9 or 0.25
@@ -910,7 +941,8 @@ function Map.open(player, gen)
     end
 
     local g = TGM.refreshGeom()
-    local cells = 2 * g.radius + 1
+    -- one cell more on every side: lights just past the circle (TGM.reachesAround)
+    local cells = 2 * (g.radius + 1) + 1
     local screenH = getCore():getScreenHeight()
     -- title, status, two button rows, key and help (about three lines)
     local chrome = 24 + PAD + (FONT_HGT_SMALL + 6) + (BTN_H + 6) * 2 + FONT_HGT_SMALL * 4 + PAD * 2

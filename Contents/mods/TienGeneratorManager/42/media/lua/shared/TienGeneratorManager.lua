@@ -19,6 +19,12 @@
     totalPowerUsing x GeneratorFuelConsumption per game hour, on the server only, and the
     engine recomputes totalPowerUsing geometrically on many events).
 
+    Light switches (ceiling switches, lamps, flood lights) reach further:
+    IsoLightSwitch.hasElectricityAround (~421) also counts the 8 squares around the switch on
+    its floor and the 9 below it, so a generator lights a lamp one tile past the edge of its
+    circle and one floor above its top floor (setSurroundingElectricity never bills those:
+    free light in vanilla). resolve(..., light = true) and reachesLight follow that rule.
+
     Devices a generator can power, on or off: IsoObject.couldBePoweredByGenerator() (fridges
     and freezers by container type, fuel pumps, lights except street lights, stoves and
     microwaves, TVs, radios, washers, dryers, battery chargers); their draw:
@@ -185,22 +191,61 @@ local function closer(d, e, bestD, best)
     return e.z < best.z
 end
 
--- The generator entry powering x, y, z; TGM.OFF when every running generator in reach
--- has it red; nil when none reaches it (or the square is on mains power, or outdoors while
--- generators may not power outdoor squares): left to vanilla.
-function TGM.resolve(x, y, z, square)
+-- A square that can carry generator power (exists; outdoors only if the sandbox allows it).
+local function carries(g, square)
+    return square ~= nil and (g.allowExt or not square:has(IsoFlagType.exterior))
+end
+
+-- IsoLightSwitch.hasElectricityAround: one of the 8 squares around x, y, z or the 9 below
+-- it is in reach of the generator at gx, gy, gz and can carry power.
+function TGM.reachesAround(g, gx, gy, gz, x, y, z)
+    for dz = 0, -1, -1 do
+        for dx = -1, 1 do
+            for dy = -1, 1 do
+                if (dx ~= 0 or dy ~= 0 or dz ~= 0) and TGM.inRange(g, gx, gy, gz, x + dx, y + dy, z + dz)
+                        and carries(g, getSquare(x + dx, y + dy, z + dz)) then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+-- The same test without looking at squares: x, y, z is within one tile (around or one floor
+-- up) of the generator's reach. For checking keys sent by clients.
+function TGM.nearRange(g, gx, gy, gz, x, y, z)
+    for dz = 0, -1, -1 do
+        for dx = -1, 1 do
+            for dy = -1, 1 do
+                if TGM.inRange(g, gx, gy, gz, x + dx, y + dy, z + dz) then return true end
+            end
+        end
+    end
+    return false
+end
+
+-- Does the generator at gx, gy, gz reach a device on x, y, z (light: by the light rule)?
+function TGM.reaches(g, gx, gy, gz, x, y, z, square, light)
+    -- the device's own square (nil = not given, taken as able to carry power)
+    if TGM.inRange(g, gx, gy, gz, x, y, z) and (square == nil or carries(g, square)) then return true end
+    return light == true and TGM.reachesAround(g, gx, gy, gz, x, y, z)
+end
+
+-- The generator entry powering a device on x, y, z (light = a light switch, see above);
+-- TGM.OFF when every running generator that reaches it has it red; nil when none reaches it
+-- (or the square is on mains power): left to vanilla.
+function TGM.resolve(x, y, z, square, light)
     local g = TGM.geom()
     square = square or getSquare(x, y, z)
-    if square then
-        if not g.allowExt and square:has(IsoFlagType.exterior) then return nil end
-        if square:hasGridPower() then return nil end
-    end
+    if square and square:hasGridPower() then return nil end
     local key = TGM.key(x, y, z)
     local cut = TGM.cutsPower()
     local green, greenD, auto, autoD
     local reached = false
     for _, e in pairs(TGM.generators) do
-        if TGM.inRange(g, e.x, e.y, e.z, x, y, z) then
+        if math.abs(x - e.x) <= g.radius + 1 and math.abs(y - e.y) <= g.radius + 1
+                and TGM.reaches(g, e.x, e.y, e.z, x, y, z, square, light) then
             local gen = TGM.liveGenerator(e)
             if gen and gen:isActivated() then
                 reached = true
@@ -223,6 +268,16 @@ function TGM.resolve(x, y, z, square)
 end
 
 -- ---- devices -------------------------------------------------------------------------
+
+function TGM.isLightSwitch(obj)
+    return instanceof(obj, "IsoLightSwitch")
+end
+
+-- Who powers this device (resolve with the light rule for light switches).
+function TGM.resolveDevice(obj, square)
+    square = square or obj:getSquare()
+    return TGM.resolve(square:getX(), square:getY(), square:getZ(), square, TGM.isLightSwitch(obj))
+end
 
 function TGM.isUnplugged(obj)
     return obj:hasModData() and type(obj:getModData()[TGM.TYPES]) == "table"
@@ -286,10 +341,12 @@ end
 
 -- A readable name (client side; the server never needs it).
 function TGM.deviceName(obj)
-    if instanceof(obj, "IsoLightSwitch") then
-        return getText(TGM.isRoomLight(obj) and "IGUI_TGM_RoomLights" or "IGUI_TGM_Lamp")
-    end
     local props = obj:getProperties()
+    if instanceof(obj, "IsoLightSwitch") then
+        if TGM.isRoomLight(obj) then return getText("IGUI_TGM_RoomLights") end
+        -- a lamp with a furniture name (Flood Lights, ...) keeps it; else just "Lamp"
+        if not (props and props:has("CustomName")) then return getText("IGUI_TGM_Lamp") end
+    end
     if props and props:has("CustomName") then
         local name = props:get("CustomName")
         if props:has("GroupName") then name = props:get("GroupName") .. " " .. name end
@@ -341,12 +398,14 @@ function TGM.recompute(withNames)
 
     for key, e in pairs(TGM.generators) do
         if state.byGen[key] then
-            for z = math.max(-32, e.z - g.vr), math.min(31, e.z + g.vr) do
-                for x = e.x - g.radius, e.x + g.radius do
+            -- one tile past the circle and one floor above it: lights reached by the light rule
+            local reach2 = (g.radius + 1.5) * (g.radius + 1.5)
+            for z = math.max(-32, e.z - g.vr), math.min(31, e.z + g.vr + 1) do
+                for x = e.x - g.radius - 1, e.x + g.radius + 1 do
                     local dx = x - e.x
-                    for y = e.y - g.radius, e.y + g.radius do
+                    for y = e.y - g.radius - 1, e.y + g.radius + 1 do
                         local dy = y - e.y
-                        if dx * dx + dy * dy <= g.r2 then
+                        if dx * dx + dy * dy <= reach2 then
                             local sKey = TGM.key(x, y, z)
                             if not seen[sKey] then
                                 seen[sKey] = true
@@ -354,15 +413,25 @@ function TGM.recompute(withNames)
                                 if square then
                                     local devices = TGM.devicesOn(square)
                                     if #devices > 0 then
-                                        local owner = TGM.resolve(x, y, z, square)
+                                    local owners, counted = {}, {}
+                                    for d = 1, #devices do
+                                        local light = TGM.isLightSwitch(devices[d])
+                                        if owners[light] == nil then
+                                            owners[light] = TGM.resolve(x, y, z, square, light) or false
+                                        end
+                                    end
+                                    for d = 1, #devices do
+                                        local obj = devices[d]
+                                        local owner = owners[TGM.isLightSwitch(obj)] or nil
                                         if owner == TGM.OFF then
                                             state.cut[sKey] = { x = x, y = y, z = z }
                                         end
                                         local info = owner and owner ~= TGM.OFF and state.byGen[owner.key]
-                                        if info then info.squares = info.squares + 1 end
-                                        for d = 1, #devices do
-                                            local obj = devices[d]
-                                            if TGM.isRoomLight(obj) then
+                                        if info and not counted[owner.key] then
+                                            counted[owner.key] = true
+                                            info.squares = info.squares + 1
+                                        end
+                                        if TGM.isRoomLight(obj) then
                                                 local room = square:getRoom()
                                                 if owner == TGM.OFF then
                                                     state.roomCut[room] = true
