@@ -1,0 +1,17 @@
+VERSION = 1,
+
+option TienGeneratorManager.CutPower
+{
+    type = boolean,
+    default = true,
+    page = TienGeneratorManager,
+    translation = TienGeneratorManager_CutPower,
+}
+
+option TienGeneratorManager.UnplugFridges
+{
+    type = boolean,
+    default = true,
+    page = TienGeneratorManager,
+    translation = TienGeneratorManager_UnplugFridges,
+}

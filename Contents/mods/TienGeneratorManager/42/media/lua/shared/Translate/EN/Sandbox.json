@@ -1,0 +1,7 @@
+{
+    "Sandbox_TienGeneratorManager": "Tien's Generator Manager",
+    "Sandbox_TienGeneratorManager_CutPower": "Disconnected squares lose power",
+    "Sandbox_TienGeneratorManager_CutPower_tooltip": "A square that every running generator in reach has disconnected (red on its map) loses power like in a blackout: lights, stoves, TVs, radios, washers, dryers and battery chargers there are switched off, and switched back on when the square gets power again. Untick to let every generator power red squares as if they were on auto; devices this mod switched off come back on. Untick this (and Unplug fridges) before removing the mod, and visit your bases once so everything is given back.",
+    "Sandbox_TienGeneratorManager_UnplugFridges": "Unplug fridges and freezers",
+    "Sandbox_TienGeneratorManager_UnplugFridges_tooltip": "Fridges and freezers have no switch, so on a disconnected square they are unplugged: the loot window shows them as Fridge (no power) or Freezer (no power), food spoils at the normal rate and frozen food thaws, as in a fridge without power. They work as fridges again when the square gets power. Untick to leave fridges and freezers powered by whichever generator is in reach. Untick before removing the mod and visit your bases once, or unplugged fridges stay plain containers."
+}

@@ -1,0 +1,9 @@
+name=Tien's Generator Manager
+id=TienGeneratorManager
+description=Wire your generators: a top-down map of each generator's reach where you connect or disconnect squares. A device only gets power from a generator connected to it; disconnected squares lose power like in a blackout (lights, stoves, TVs, washers go dark, fridges warm up) and come back when connected again. Fuel is only used for what each generator really powers. Replaces Nick's Generator Manager.
+author=Tien
+icon=icon.png
+poster=poster.png
+modversion=1.0.0
+category=QoL
+incompatible=\NicksGeneratorManager
