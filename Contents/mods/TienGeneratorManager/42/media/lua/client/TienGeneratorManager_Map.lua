@@ -10,7 +10,8 @@
     black = nobody (power cut), none = no running generator reaches it. A key under the map
     names the dot colours; the right-click box says it in words too.
 
-    Pick a brush and click or drag over squares; each stroke is one request (applied by the
+    Pick a brush and click or drag over squares (a drag paints every square the mouse crossed
+    since its last position, so a fast drag leaves no gaps); each stroke is one request (applied by the
     server, which answers "applied" to everyone or "refused" to the sender). Until then the
     painted squares show the brush. Connect all / Disconnect all / Auto all (after a yes/no)
     set the default of the floor shown for every square of it in reach, devices or not, and
@@ -304,17 +305,29 @@ function Grid:render()
     self:drawRectBorder(0, 0, w, h, 1, 0.4, 0.4, 0.4)
 end
 
-function Grid:cellAt(x, y)
+-- the cell under a point of the viewport (any cell of the grid, paintable or not)
+function Grid:rawCellAt(x, y)
     if x < 0 or y < 0 or x >= self.width or y >= self.height then return nil end
     local T = self.cell
     local i, j = math.floor((x + self.offX) / T), math.floor((y + self.offY) / T)
     if i < 0 or j < 0 or i >= self.cells or j >= self.cells then return nil end
+    return i, j
+end
+
+-- cells in reach, plus the lights reached from outside it
+function Grid:paintable(i, j)
+    if i < 0 or j < 0 or i >= self.cells or j >= self.cells then return false end
     local g = TGM.geom()
     local dx, dy = i - self.half, j - self.half
     local floorInReach = self.win.floor >= math.max(-32, self.win.gz - g.vr)
         and self.win.floor <= math.min(31, self.win.gz + g.vr)
-    if floorInReach and dx * dx + dy * dy <= g.r2 then return i, j end
-    if self.deviceAt and self.deviceAt[self:keyOf(i, j)] then return i, j end
+    if floorInReach and dx * dx + dy * dy <= g.r2 then return true end
+    return self.deviceAt ~= nil and self.deviceAt[self:keyOf(i, j)] ~= nil
+end
+
+function Grid:cellAt(x, y)
+    local i, j = self:rawCellAt(x, y)
+    if i and self:paintable(i, j) then return i, j end
     return nil
 end
 
@@ -330,7 +343,6 @@ function Grid:updateHover(x, y)
         return
     end
     self.hover = { i = i, j = j, key = self:keyOf(i, j) }
-    if self.stroke then self:addStroke(i, j) end
 end
 
 function Grid:addStroke(i, j)
@@ -341,13 +353,53 @@ function Grid:addStroke(i, j)
     self.win.pending[key] = self.win.brush
 end
 
+-- the mouse in cell units (a zoom or pan mid-stroke keeps the stroke's last point valid)
+function Grid:mouseCell()
+    local T = self.cell
+    return (self:getMouseX() + self.offX) / T, (self:getMouseY() + self.offY) / T
+end
+
+-- Paints every cell the mouse crossed since the last point of the stroke (a grid walk
+-- along the segment), so a fast drag leaves no gaps between mouse events.
+-- Cells outside the viewport are left alone, as a click there would be.
+function Grid:strokeTo(x1, y1)
+    local x0, y0 = self.strokeAt[1], self.strokeAt[2]
+    self.strokeAt = { x1, y1 }
+    local T = self.cell
+    local i0, i1 = math.floor(self.offX / T), math.floor((self.offX + self.width - 1) / T)
+    local j0, j1 = math.floor(self.offY / T), math.floor((self.offY + self.height - 1) / T)
+    local function paint(i, j)
+        if i >= i0 and i <= i1 and j >= j0 and j <= j1 and self:paintable(i, j) then self:addStroke(i, j) end
+    end
+    local i, j = math.floor(x0), math.floor(y0)
+    local iEnd, jEnd = math.floor(x1), math.floor(y1)
+    paint(i, j)
+    local dx, dy = x1 - x0, y1 - y0
+    local si, sj = dx > 0 and 1 or -1, dy > 0 and 1 or -1
+    local huge = math.huge
+    local tdx = dx ~= 0 and math.abs(1 / dx) or huge
+    local tdy = dy ~= 0 and math.abs(1 / dy) or huge
+    local tx = dx ~= 0 and ((si > 0 and (i + 1 - x0) or (x0 - i)) * tdx) or huge
+    local ty = dy ~= 0 and ((sj > 0 and (j + 1 - y0) or (y0 - j)) * tdy) or huge
+    local steps = math.abs(iEnd - i) + math.abs(jEnd - j)
+    for _ = 1, steps do
+        if j == jEnd or (i ~= iEnd and tx < ty) then
+            i, tx = i + si, tx + tdx
+        else
+            j, ty = j + sj, ty + tdy
+        end
+        paint(i, j)
+    end
+end
+
 function Grid:onMouseDown(x, y)
     if self.panning then return true end
     self.win.pinned = nil
-    local i, j = self:cellAt(x, y)
-    if not i then return true end
+    if not self:cellAt(x, y) then return true end
     self.stroke, self.strokeList = {}, {}
-    self:addStroke(i, j)
+    local cx, cy = self:mouseCell()
+    self.strokeAt = { cx, cy }
+    self:strokeTo(cx, cy)
     self:setCapture(true)
     return true
 end
@@ -360,6 +412,7 @@ function Grid:onMouseMove(dx, dy)
         self:clampOffsets()
         return
     end
+    if self.stroke then self:strokeTo(self:mouseCell()) end
     self:updateHover(mx, my)
 end
 
@@ -376,6 +429,7 @@ function Grid:finishStroke()
     if not self.panning then self:setCapture(false) end
     local keys = self.strokeList
     self.stroke, self.strokeList = nil, nil
+    self.strokeAt = nil
     if #keys > 0 then self.win:send(keys, self.win.brush) end
 end
 

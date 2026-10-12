@@ -28,7 +28,8 @@ Engine facts below were traced in the 42.21 jar (Vineflower; recipe in ZomboidFi
   steady = fadeSpeed 0, min = max. Drawn only on the player's floor (`m.z == player.getZ()`).
   Devices = `TGM.Highlight` source "devices" (client file keeps named sources with their own colours).
 - `media/lua/client/TienGeneratorManager_Map.lua`: the map window (fixed viewport, wheel zoom around the cursor,
-  right-drag pan, `setStencilRect` clip, strokes sent in batches of 2000 keys since the server reads at most 5000 per
+  right-drag pan, `setStencilRect` clip, strokes (a grid walk from the last mouse position in cell units, on every
+  mouse move: mouse events come once a frame, so a fast drag jumps several cells) sent in batches of 2000 keys since the server reads at most 5000 per
   request; hover = world highlight of the square's devices, right-click = vanilla pick-up style picture of the
   square + device list pinned beside it).
   Connect/Disconnect/Auto all (after an `ISModalDialog`) act on the floor shown: they set that floor's default
